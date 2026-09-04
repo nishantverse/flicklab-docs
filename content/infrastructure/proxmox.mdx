@@ -1,0 +1,211 @@
+<DocLead>
+
+Every other page on this site describes a specific service. **This one details the underlying operating system that powers them all.**
+
+Proxmox is what turns one small desktop PC into several machines. Instead of installing every service onto a single operating system and hoping they get along, each one gets its own box, its own reset button, and its own way of falling over without taking the others with it.
+
+</DocLead>
+
+<DocSection index="01" title="Why Proxmox?">
+
+The honest version of this starts with something that irritated me enough to change how the lab was built. I would rather leave that gap open than fill it with a tidy invention, so here is the gap.
+
+Before Proxmox, the homelab was running directly on Ubuntu Server. There was nothing particularly wrong with that setup; it worked. The difference was what happened when I broke something. Because the services were running on the bare system, a serious mistake could mean reinstalling the entire operating system just to get back to a clean state.
+
+Nothing was really frustrating me. The problem was simply that everything lived directly on the bare system. If I broke the operating system while experimenting, the recovery path was to reinstall the whole thing. As the homelab became more experimental, I wanted a layer that could isolate the things I was running and make mistakes easier to recover from.
+
+I moved to Proxmox because it solved that problem without requiring a separate physical machine for every service. Instead of treating the entire server as one installation, I could divide it into VMs and containers and manage them independently.
+
+What I can describe is the shape of the problem, because most single-server labs walk into the same one.
+
+Put every service on one operating system and it works fine, right up until it doesn't. Then you notice:
+
+- **Nothing is isolated.** One service wants an older library, another wants a newer one, and the package manager makes you pick a winner.
+- **There is no clean rollback.** You edited four config files at 1am. Which change was the fix and which is the new bug?
+- **Experiments sit next to things you depend on.** Anything unfamiliar gets tested on the machine that serves your media.
+- **Everything shares one uptime.** A reboot for one service is a reboot for all of them.
+
+<Callout kind="why" title="The actual pitch">
+
+Virtualization does not stop you breaking things. It makes breaking things cheap to undo. That is the entire reason this layer exists.
+
+</Callout>
+
+</DocSection>
+
+<DocSection index="02" title="So, what is Proxmox?">
+
+If you have only ever installed one operating system per computer, the idea worth sitting with is this: hardware and operating system are not the same decision. One machine can host many, and something has to sit in between handing out the pieces. That something is a hypervisor. Proxmox VE is one.
+
+<ArchitectureDiagram
+  title="The layer model"
+  caption="A general picture of how the pieces stack, not a map of my machine. That comes next."
+  layers={[
+    { label: 'Physical hardware', note: 'One set of real parts: CPU, RAM, disks, a network port' },
+    { label: 'Proxmox VE', note: 'The hypervisor. Owns the hardware, hands out slices of it' },
+    {
+      label: 'Guests',
+      note: 'Two kinds, on the same host',
+      items: [
+        { label: 'Virtual machines', note: 'Virtual hardware, own kernel' },
+        { label: 'LXC containers', note: 'Share the host kernel' },
+      ],
+    },
+    { label: 'Operating systems', note: 'Whatever each guest needs to boot' },
+    { label: 'Applications', note: 'The services you actually came for' },
+  ]}
+/>
+
+Four words get used loosely in this space, so here they are pinned down.
+
+<CardGrid columns={2}>
+  <Card kicker="One machine, one OS" title="Physical machine" mark="▣">
+
+  A computer as most people meet it. One set of hardware, one operating system installed straight onto it.
+
+  Simple and fast, but all-or-nothing: every service on it shares one fate.
+
+  </Card>
+
+  <Card kicker="The layer in between" title="Hypervisor" mark="◧">
+
+  A thin operating system whose only job is dividing hardware and pretending, convincingly, to be many computers.
+
+  Proxmox VE is a Debian-based hypervisor with a web console. It does not run your services. It runs the things that run your services.
+
+  </Card>
+
+  <Card kicker="Guest, heavier" title="Virtual machine" mark="◩">
+
+  A VM gets virtual hardware: virtual disk, virtual network card, virtual firmware. It boots its own kernel, because as far as it knows it is a real computer.
+
+  That buys strong isolation and the freedom to run an OS unlike the host. The cost is overhead: its own kernel, its own RAM, its own boot.
+
+  </Card>
+
+  <Card kicker="Guest, lighter" title="LXC container" mark="◪">
+
+  An LXC container shares the host kernel and gets an isolated slice of userspace: own filesystem, own processes, own network config.
+
+  It starts in about a second and costs far less RAM. In exchange it must be Linux, and a shared kernel is still a shared kernel.
+
+  </Card>
+</CardGrid>
+
+Proxmox VE runs both kinds side by side, so you never have to pick a camp before you know how heavy a new service is.
+
+<Callout kind="gotcha" title="Two things called containers">
+
+LXC containers and Docker containers are not the same thing. LXC holds a whole Linux userspace and behaves like a small machine you log into. Docker packages one application and its dependencies. They stack happily, and often do.
+
+</Callout>
+
+</DocSection>
+
+<DocSection index="03" title="My Proxmox machine">
+
+The hypervisor runs on a secondhand office desktop, which is the least exciting and most sensible option available.
+
+<SpecTable
+  label="The Proxmox host"
+  rows={[
+    { term: 'Machine', detail: 'Dell Optiplex 7070 Micro' },
+    { term: 'CPU', detail: 'Intel Core i5-8500T (six cores, low-power T variant)' },
+    { term: 'RAM', detail: '24 GB' },
+    { term: 'Storage', detail: '512 GB NVMe SSD' },
+    { term: 'Storage', detail: '512 GB SATA SSD' },
+    { term: 'Hypervisor', detail: 'Proxmox VE 9' },
+    { term: 'Disk layout', detail: 'Two SSDs; the exact allocation is intentionally not described here' },
+  ]}
+/>
+
+Micro business PCs are cheap, quiet, and highly energy-efficient, making them the perfect hardware for 24/7 home servers. A configuration with six cores and 24 GB of RAM easily handles dozens of self-hosted services. Because idle applications constantly consume memory without stressing the processor, maximizing your RAM is far more important than upgrading the CPU.
+
+</DocSection>
+
+<DocSection index="04" title="How my lab uses Proxmox">
+
+This is the part that describes how I actually use Proxmox. The physical machine and hypervisor form the base, while the services are grouped into a single Ubuntu VM and managed through Docker.
+
+<ArchitectureDiagram
+  title="How my lab is shaped"
+  caption="The current media stack runs through a single Ubuntu VM, with Docker handling the individual services."
+  layers={[
+    { label: 'Dell Optiplex 7070 Micro', note: 'i5-8500T · 24 GB RAM · two 512 GB SSDs' },
+    { label: 'Proxmox VE 9', note: 'Hypervisor and web console' },
+    { label: 'Ubuntu VM', note: 'The main guest for the service stack' },
+    { label: 'Docker', note: 'Runs inside the Ubuntu VM' },
+    {
+      label: 'Services',
+      items: [
+        { label: 'Jellyfin', note: 'Media server' },
+        { label: 'ARR Stack', note: 'Media automation' },
+        { label: 'Other services', note: 'Additional Docker containers' },
+      ],
+    },
+  ]}
+/>
+
+The two services documented here are [Jellyfin](/services/jellyfin), which turns files into a browsable library, and the [ARR Stack](/services/arr-stack), the automation behind it. Both suit a guest on a host like this: small, always on, happier with a snapshot before every upgrade.
+
+Storage is deliberately kept separate from the VM's system environment. The exact storage implementation is less important to this page than the architectural boundary: Proxmox handles the virtual machines, while the media and service data have their own storage arrangement.
+
+
+</DocSection>
+
+<DocSection index="05" title="Why this architecture works for me">
+
+All of these are bullet points on the Proxmox website. Here is what they mean in a lab this size.
+
+#### Isolation
+
+A service that breaks breaks alone. A bad upgrade in one guest is invisible to the media server in the next one. The blast radius of a mistake is a single disposable machine.
+
+#### Experimentation
+
+Trying something new stops being a commitment. A guest costs a few minutes and some RAM, and if the idea turns out dull it goes away leaving nothing behind — no stray packages, no orphaned config in `/etc`.
+
+#### Easier recovery
+
+On a single-OS box, recovery means reinstalling and trying to remember what you did. Here it means restoring one guest while the host and everything else stays up.
+
+#### Resource allocation
+
+Cores, RAM and disk are assigned per guest rather than fought over. A background job cannot quietly eat all 24 GB, because it was never given the chance.
+
+#### Snapshots
+
+A snapshot is a point-in-time copy of a whole guest: its disk, and optionally its running memory. Roll back and the guest returns to exactly how it was, mid-uptime.
+
+#### Multiple environments
+
+Two guests can run different versions of the same thing without arguing. Test one, keep serving from the other, swap when you trust it.
+
+<FlowDiagram
+  title="The try-something-risky loop"
+  caption="A snapshot is an undo button, not a fire escape. It lives on the same host and the same disks, so it is not a backup."
+  steps={[
+    { label: 'Snapshot the guest', note: 'Seconds. Cheap enough that there is no excuse to skip it.' },
+    { label: 'Change something risky', via: 'then', note: 'A major upgrade, a config rewrite, a service you have never run before.' },
+    { label: 'Check what actually happened', via: 'and', note: 'Does the thing work? Do the services around it still work?' },
+    { label: 'Keep it, or roll back', via: 'so', note: 'Rolling back puts the guest exactly where it started. Minutes, not a lost evening.' },
+  ]}
+/>
+
+</DocSection>
+
+<DocSection index="06" title="What I've learned">
+
+After moving to Proxmox, I realised that the virtualization itself was only part of what made it useful. Managing VMs and LXC containers from one place was straightforward, while snapshots and backups made experimenting much less intimidating. Instead of a mistake potentially meaning a full reinstall, I had much more practical ways to recover and continue.
+
+I have already answered this one in practice. When I updated the node, I rebuilt the Proxmox setup from scratch and used that opportunity to change the way I organised the services.
+
+Earlier, I created a separate LXC container for each service, which also meant different IP addresses for each one. In the rebuilt setup, I moved to a simpler model: one Ubuntu VM with Docker installed, with each service running as its own Docker container.
+
+For now, I am happy with that architecture and do not have anything I want to change.
+
+One thing holds generally, and it is why this layer earns its keep: breaking things is far less frightening when a broken experiment cannot take the rest of the lab with it. Curiosity gets expensive when every mistake costs an evening of repair. Make the mistakes cheap and you try more things.
+
+The nicest thing you can say about a working hypervisor is that it gets boring. It sits under everything, stops asking for attention, and pushes the interesting problems up a layer to the services themselves.
+
+</DocSection>

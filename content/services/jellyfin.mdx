@@ -1,0 +1,314 @@
+<DocLead>
+
+A video file on a disk is not a library. You can play it, as long as you remember which folder it went into and which drive is plugged in, and nothing anywhere remembers which episode you stopped on.
+
+Jellyfin closes that gap. It reads files that already live on lab storage and hands back a shelf: artwork, episodes grouped into seasons, a resume position, the same view from a television or a browser.
+
+For me, Jellyfin started with a much simpler problem: **getting a movie onto the TV was annoying.**
+
+Before having a media server, if me or someone in my family wanted to watch a movie, I would sometimes download it, move it to a USB drive, take that drive to the TV, plug it in and then find the file through the TV's file browser.
+
+It worked. It was just a pain.
+
+Jellyfin turned that process into something much closer to an actual streaming service, while keeping the files on hardware I own.
+
+</DocLead>
+
+<DocSection index="01" title="Why Jellyfin?">
+
+The reason I wanted Jellyfin was not originally because I wanted to build a complicated media infrastructure. It came from a very ordinary problem at home.
+
+There are plenty of times when me or my family wants to watch a movie that is either on an OTT platform we do not subscribe to, is not available on the platforms we have, or has simply disappeared from them for whatever reason.
+
+The old solution was downloading the movie, copying it to a USB drive and plugging that USB into the TV.
+
+Again, it worked. But every movie involved the same little ritual:
+
+**Download → copy → find USB → plug into TV → navigate folders → play.**
+
+And then there was the question of where everything was stored, whether the USB had enough space, and what happened when we wanted to watch a series instead of a single movie.
+
+I wanted something that behaved more like the streaming services we were already used to.
+
+That is where Jellyfin came in.
+
+Instead of treating every movie as a file I have to manually find, the server turns the collection into an actual library. Movies get posters and descriptions. Shows are grouped into seasons and episodes. Playback progress is remembered. And the same library can be opened from the TV, laptop or phone.
+
+The files are still just files on a disk. Jellyfin is the layer that makes them feel like something more.
+
+### What I wanted to learn
+
+The main thing I wanted to learn was **media management**.
+
+I wanted to understand how a collection of movies and shows could be organised into something that was actually pleasant to use: naming files properly, organising folders, getting metadata and artwork, keeping track of watched episodes, and making the same library available across different devices.
+
+There was also the infrastructure side of it — running another service inside the homelab, putting it in Docker, giving it access to the storage, and understanding how a media server actually moves a file from storage to a screen.
+
+I am still learning the deeper parts, especially transcoding and hardware acceleration. Fortunately, most of my actual playback is direct play, so I have not had to solve the hardest version of that problem yet.
+
+What I can describe is the shape of the problem, because most people arrive carrying the same one.
+
+* **Files end up everywhere.** A folder here, an external drive there, two naming schemes and no index over the top.
+* **Nobody wants file paths on a television.** Browsing a network share from a sofa is a bad time. You want a poster and one button.
+* **Playback state lives nowhere.** Watch forty minutes, close it, guess tomorrow.
+* **It should run on hardware I own.** The files are here and the storage is here. Sending it elsewhere to get an interface back is a strange trade.
+
+<Callout kind="why" title="Why this one specifically">
+
+Jellyfin is free software, runs entirely on a machine you control, and needs no external account for playback to start. For a lab with zero public ports that is a practical fit rather than a philosophy: a server that only needs the LAN works fine on a LAN-only network.
+
+</Callout>
+
+</DocSection>
+
+<DocSection index="02" title="What is Jellyfin?">
+
+Jellyfin is a Software that sits between files and screens. Point it at a folder, say what kind of thing is in there, and it builds the rest from what is already on disk.
+
+#### It scans and matches
+
+A library is essentially a path plus a type. Told a directory holds television, Jellyfin reads the file names, groups episodes into seasons and seasons into series, then matches those names against online metadata providers for titles, cast and artwork.
+
+That lookup is the part that reaches outside the network. The actual media files remain on my own storage.
+
+This is also why naming matters more than it initially seems. Jellyfin can only make a good guess about what a file represents if the file and folder structure give it something sensible to work with.
+
+#### It serves and remembers
+
+Once the library exists, Jellyfin makes it available to clients over the network.
+
+The TV can ask for a movie and start playing it. The laptop can open the same library. The phone can do the same thing. Watched state and resume position live on the server rather than being tied to one particular device.
+
+That is a surprisingly important difference from the old USB workflow.
+
+Stop watching something on one device and the server knows where you stopped. Open it somewhere else and you can continue from there.
+
+What Jellyfin does **not** do is go looking for media.
+
+It never searches for a title, never fetches anything, and does not decide what should exist in the library. It notices the files that are already there and turns them into something usable.
+
+Everything upstream of that is section 05.
+
+</DocSection>
+
+<DocSection index="03" title="How it fits into the lab">
+
+Three layers. Something holds the files, something serves them, something plays them.
+
+<ArchitectureDiagram
+title="The playback path"
+caption="The actual deployment: Jellyfin runs inside a VM on the OptiPlex, while the media is stored on a separate partition on a separate disk in the same physical machine."
+layers={[
+{ label: 'Lab storage', note: 'Media files stored on a separate disk and partition' },
+{ label: 'Jellyfin server', note: 'Docker container inside a VM on the OptiPlex' },
+{
+label: 'Clients',
+note: 'Devices on the LAN',
+items: [
+{ label: 'TV' },
+{ label: 'Linux laptop' },
+{ label: 'Phone' },
+],
+},
+]}
+/>
+
+The OptiPlex is the machine doing the work here. It runs Proxmox VE, and Jellyfin runs inside a VM. Docker runs inside that VM, with Jellyfin deployed as a container.
+
+The media itself is stored on the same physical machine, but on a **separate partition on a separate disk**.
+
+That means the media does not have to cross the LAN just to reach Jellyfin. The storage and Jellyfin are physically on the same machine, even though they are separated logically through the VM and storage configuration.
+
+The clients are currently pretty simple: the TV, my Linux laptop and my phone.
+
+All of them access the same Jellyfin library over the LAN.
+
+
+</DocSection>
+
+<DocSection index="04" title="Jellyfin architecture">
+
+Four moving parts, and only one of them is expensive.
+
+<CardGrid columns={2}>
+
+<Card kicker="Where the bytes live" title="Media storage" mark="▣">
+
+Files on a disk somewhere. Jellyfin does not own them or move them; it needs a path it can read. Video is large and read sequentially, so capacity matters more than speed for the storage itself.
+
+</Card>
+
+<Card kicker="The bookkeeping" title="The server process" mark="◧">
+
+Scans paths, matches names against metadata providers, caches artwork, tracks what exists and who watched what. Most of its work happens when something changes or when a client asks for something.
+
+</Card>
+
+<Card kicker="The screens" title="Clients" mark="◩">
+
+A TV app, a phone, a browser tab or another supported client. Each asks for a library, then a stream, then reports progress back. What each client can decode determines whether direct play is possible.
+
+</Card>
+
+<Card kicker="The expensive bit" title="Streaming and transcoding" mark="◪">
+
+Shipping a file untouched is relatively cheap. Converting it while you watch is not, and transcoding is the part that can turn a simple media server into a CPU-heavy workload.
+
+</Card>
+
+</CardGrid>
+
+#### Direct play against transcoding
+
+This is one part of Jellyfin I am still learning properly.
+
+**Direct play** is the simple case. The server sends the media file to the client without having to convert the video. The client understands the format, so Jellyfin mostly just has to serve the bytes.
+
+That is what happens for me most of the time, and it is one reason the current setup does not need much processing power for normal playback.
+
+**Transcoding** is different. If the client cannot handle the video or audio format, the bitrate is too high, or something else about the media is incompatible with the client, Jellyfin may have to convert the stream into something the client can actually play.
+
+That conversion takes processing power and can happen while the video is playing.
+
+I currently have **hardware transcoding disabled**.
+
+That has not been a major problem because my usual clients — the TV, Linux laptop and phone — direct play most of the media I watch.
+
+I am still figuring out the details of codecs, containers, subtitles, hardware acceleration and exactly when Jellyfin decides that transcoding is necessary. For now, the important distinction is simple:
+
+> If the client can play the original file, Jellyfin mostly just serves it. If it cannot, the server may have to do considerably more work.
+
+#### Naming is the quiet dependency
+
+Metadata matching is pattern matching.
+
+Consistent names let the library land on the right title and pull the right artwork. Inconsistent ones give you duplicates, wrong matches and blank posters, and no server setting fixes a folder that cannot be parsed properly.
+
+This is one of those things that feels unimportant when you are downloading your first few movies and becomes very important once the collection grows.
+
+<Callout kind="gotcha" title="Transcoding is a symptom, not a feature">
+
+Every transcoded stream is the server working around something: a format the client cannot read, a bitrate the link cannot carry, a subtitle being burned into the picture.
+
+Worth knowing which, because sometimes the cheaper fix is a different client or a better media format rather than more CPU.
+
+</Callout>
+
+</DocSection>
+
+<DocSection index="05" title="Jellyfin + ARR">
+
+Worth getting straight, because the two get talked about as one thing.
+
+They are not.
+
+**Jellyfin is the playback layer. The ARR Stack is the automation layer.**
+
+<FlowDiagram
+title="From a request to a poster on the TV"
+steps={[
+{ label: 'A request goes in', note: 'A title is added to the automation layer and marked as wanted' },
+{ label: 'ARR stack', note: 'Works out what is missing and what counts as an acceptable file', via: 'a request' },
+{ label: 'Download client', note: 'Moves the data and reports back when the transfer is finished', via: 'a search' },
+{ label: 'Storage', note: 'Renamed to the library scheme and filed into the folder Jellyfin watches', via: 'a finished file' },
+{ label: 'Jellyfin library scan', note: 'Spots the new path, matches metadata, pulls artwork', via: 'a new file' },
+{ label: 'Playback', note: 'Correct series, correct episode number, correct poster, on whichever client asked', via: 'a stream' },
+]}
+caption="Conceptual, and split across two parts of the homelab. The automation stack gets media onto storage; Jellyfin turns that media into a library and serves it."
+/>
+
+The handover between them is a filesystem, not a direct Jellyfin-to-ARR relationship.
+
+The automation layer finishes by leaving a correctly named file in a folder, and Jellyfin starts by noticing that the folder contains something it can add to the library.
+
+Neither service needs to be the other.
+
+So Jellyfin never fetches anything. No downloader, no sources, no queue.
+
+Take the automation away and Jellyfin carries on serving whatever is already on disk. It just stops gaining new media automatically.
+
+Likewise, take Jellyfin away and the ARR stack can still organise and download media. You simply lose the nice interface for actually watching it.
+
+A disc rip copied into the library folder by hand looks exactly the same to Jellyfin and skips the middle of that diagram entirely.
+
+That gives the two systems a useful separation:
+
+**Nothing new appearing?** Look upstream at the automation and storage side.
+
+**Something is already there but looks wrong in Jellyfin?** Look at the Jellyfin library, naming and metadata side.
+
+</DocSection>
+
+<DocSection index="06" title="My setup">
+
+This is what the Jellyfin deployment actually looks like today.
+
+<SpecTable
+label="Current deployment"
+rows={[
+{ term: 'Role', detail: 'Media streaming' },
+{ term: 'Platform', detail: 'Linux / Docker' },
+{ term: 'Host', detail: 'OptiPlex — Jellyfin runs inside a VM using Docker' },
+{ term: 'Media storage', detail: 'Separate partition on a separate disk in the OptiPlex' },
+{ term: 'Hardware transcoding', detail: 'Disabled' },
+{ term: 'Clients', detail: 'TV, Linux laptop and phone' },
+]}
+/>
+
+The physical layout is fairly straightforward.
+
+The OptiPlex runs Proxmox VE. Inside Proxmox, there is a VM dedicated to running services, and Jellyfin runs as a Docker container inside that VM.
+
+The media library is stored on the OptiPlex itself, but not on the same partition as everything else. It lives on a separate partition on a separate physical disk.
+
+That keeps the media storage separated from the rest of the system while still keeping the actual media close to the Jellyfin server.
+
+There is currently no hardware transcoding configured.
+
+That sounds more significant than it has actually been in practice. Most of the time, my clients simply direct play the media, so Jellyfin does not need to perform a full video conversion for every stream.
+
+The current clients are:
+
+* **TV** — the main reason Jellyfin exists in the first place.
+* **Linux laptop** — useful for watching from the desk and testing playback.
+* **Phone** — for when the TV or laptop is not the convenient option.
+
+For now, that is enough.
+
+I am deliberately not treating the current configuration as the final form of the service. Transcoding and hardware acceleration are things I still want to understand properly before changing the setup around them.
+
+</DocSection>
+
+<DocSection index="07" title="What I've learned">
+
+What surprised me most is how little I actually have to think about Jellyfin during normal use.
+
+I originally expected the streaming and transcoding side to be a bigger problem, but most of the time my devices simply direct play the media.
+
+The TV, Linux laptop and phone can handle most of what I watch, so the server mostly just serves the existing file rather than doing heavy processing.
+
+I am still figuring out transcoding properly. I understand the basic idea and why it exists, but I have not had much reason to go deep into hardware acceleration yet because the current setup works without it.
+
+The bigger lesson has actually been **media management**.
+
+Once the files are named and organised properly, Jellyfin does a surprisingly good job of turning a pile of files into something that feels like an actual streaming service.
+
+That was ultimately what I wanted from the beginning.
+
+I did not really want to become a media-server administrator. I wanted my family to be able to turn on the TV, open Jellyfin, find a movie and press play without knowing — or caring — where the actual file is stored.
+
+And that is probably the most satisfying part of the whole setup.
+
+The infrastructure underneath it can be a VM running Docker, connected to a separate disk and sitting inside a Proxmox host. The user experience does not need to expose any of that.
+
+It just needs to feel like a streaming service.
+
+One thing does hold generally. The hard part of a media server is almost never the media server.
+
+Jellyfin installs in minutes and then sits there being reliable, while the time goes into file naming, storage layout, client compatibility and deciding how the media should actually be managed.
+
+Slightly deflating for software whose whole job looks like video.
+
+The interesting problem was filing all along.
+
+</DocSection>

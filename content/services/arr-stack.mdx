@@ -1,0 +1,293 @@
+<DocLead>
+
+[Jellyfin](/services/jellyfin) is the part you see: posters, seasons, resume where you left off. It plays files. It has no opinion about where they came from.
+
+Something still has to find the thing, fetch it, rename it to the scheme the media server expects, and drop it in the folder the media server watches. By hand that is fine once. It gets old by the fourth time.
+
+That is what the ARR stack does.
+
+Instead of me manually finding a release, downloading it, renaming it, moving it into the right folder and then waiting for Jellyfin to notice it, the stack turns that whole process into a pipeline.
+
+This page is about that pipeline: what each piece does, how they talk to each other, where mine runs, and why the storage layout matters more than it first appears.
+
+</DocLead>
+
+<DocSection index="01" title="What is the ARR stack?">
+
+The ARR stack is not one application. It is a handful of small programs that each own one step of a media pipeline and talk to each other over HTTP APIs on the local network.
+
+One knows television, one knows films, one manages the sources being searched, and one moves the actual bytes.
+
+The name is a joke that stuck. The apps share an `*arr` suffix — Sonarr, Radarr, Prowlarr, Bazarr — so the arrangement became the ARR stack.
+
+### Why several apps instead of one
+
+* **Each does one job.** A series is a grid of seasons and episodes with gaps that open over time. A film is one item, present or not.
+* **You run only what you need.** No films, no Radarr. No automatic subtitles, no Bazarr.
+* **They integrate over APIs, not guesswork.** Each has its own UI, database and API key, and sends the next one a specific request instead of watching a folder and hoping.
+
+The cost is four or five services instead of one, each with its own configuration and its own opinion about file paths.
+
+In my setup, the stack is built around **Prowlarr, Sonarr, Radarr and qBittorrent**, with the media ultimately being consumed by Jellyfin.
+
+Bazarr is not part of the core setup.
+
+</DocSection>
+
+<DocSection index="02" title="The individual pieces">
+
+These are the components that make up my stack.
+
+<CardGrid columns={2}>
+
+<Card kicker="TV" title="Sonarr" mark="◉">
+
+Sonarr manages television. It understands seasons and episodes, holds the list of series I follow, and tracks what is already available against what is missing.
+
+</Card>
+
+<Card kicker="Film" title="Radarr" mark="◈">
+
+Radarr does the same job for films. Instead of tracking a grid of episodes, it manages individual movie titles and works out what is missing and what should be imported.
+
+</Card>
+
+<Card kicker="Sources" title="Prowlarr" mark="⌗">
+
+Prowlarr manages the indexers used by the ARR applications. Configure the sources here and it can make them available to Sonarr and Radarr instead of configuring the same indexers independently in every application.
+
+</Card>
+
+<Card kicker="Transfers" title="qBittorrent" mark="↓">
+
+qBittorrent is the download client. Sonarr and Radarr decide what they want downloaded, and qBittorrent is responsible for actually transferring the data and reporting the download status back.
+
+</Card>
+
+</CardGrid>
+
+The division is intentionally simple:
+
+**Prowlarr finds sources.
+Sonarr manages TV.
+Radarr manages movies.
+qBittorrent moves the data.
+Jellyfin plays the result.**
+
+<SpecTable
+label="Current deployment"
+rows={[
+{ term: 'Role', detail: 'Media automation' },
+{ term: 'Platform', detail: 'Linux / Docker' },
+{ term: 'Host', detail: 'Dockyard Ubuntu VM' },
+{ term: 'Components', detail: 'Prowlarr, Sonarr, Radarr, qBittorrent' },
+{ term: 'Download client', detail: 'qBittorrent' },
+{ term: 'Storage', detail: '300GB partition of a SATA SSD mounted at /data' },
+]}
+/>
+
+Everything runs through Docker on the **Dockyard Ubuntu VM**. The whole stack is managed together rather than treating each application as a completely separate deployment.
+
+</DocSection>
+
+<DocSection index="03" title="The pipeline">
+
+Every app here exists to hand something to the next one. End to end it is a conveyor belt: a request at one end, a poster on the television at the other.
+
+<FlowDiagram
+title="Request to playback"
+steps={[
+{ label: 'A request goes in', note: 'A title is added and marked as monitored' },
+{ label: 'Sonarr / Radarr', note: 'Works out what is missing and what it is allowed to accept', via: 'a request' },
+{ label: 'Indexer lookup via Prowlarr', note: 'Configured sources are queried for suitable releases', via: 'a search' },
+{ label: 'qBittorrent', note: 'Takes the transfer, works through it, reports back when complete', via: 'a chosen release' },
+{ label: 'Storage', note: 'Imported, renamed and filed into the library layout', via: 'a finished file' },
+{ label: 'Jellyfin', note: 'Reads the library, matches metadata and fetches artwork', via: 'a library scan' },
+{ label: 'Playback', note: 'On the TV, in the right series, with the right episode number', via: 'a stream' },
+]}
+caption="The actual stack runs in Docker on the Dockyard Ubuntu VM. The media is stored under /data and is then exposed to Jellyfin as its library."
+/>
+
+The arrows matter more than the boxes.
+
+Each hop is a specific handover, so when something breaks there is usually a nameable step to investigate.
+
+The important part is that the ARR applications do not themselves download the data. Sonarr or Radarr decides that something is wanted, Prowlarr helps find a suitable source, and qBittorrent handles the actual transfer.
+
+Once the download finishes, the ARR application takes over again.
+
+It imports the file, applies the naming scheme, puts it into the correct library directory and marks the item as available.
+
+Jellyfin then sees the finished file and takes care of everything on the playback side.
+
+All of this runs inside the LAN. The stack's web interfaces are not exposed through public ports.
+
+</DocSection>
+
+<DocSection index="04" title="A real example">
+
+Say I want a movie added to the library.
+
+The exact release-selection details depend on the quality profile and rules configured in Radarr, but the overall process looks like this:
+
+1. **Add it.** Search for the title in Radarr, pick the correct match, choose the quality profile and library location.
+2. **Radarr works out what is missing.** For a film, that means the movie is simply not present yet.
+3. **A search goes out.** Radarr asks Prowlarr for available sources that match the requirements.
+4. **A candidate is selected.** Resolution, size limits, preferred terms and rejected terms can all influence which release is acceptable.
+5. **qBittorrent fetches it.** The chosen download is handed to qBittorrent, which performs the actual transfer.
+6. **Radarr imports it.** Once complete, Radarr recognises the finished file, renames it according to the library naming scheme and places it in the movie library.
+7. **Jellyfin picks it up.** The next library scan finds the new file and matches its metadata.
+8. **It lands on the TV.** The movie now appears in Jellyfin with the proper title, artwork and library placement.
+
+The important thing is what **I don't** have to do after step 1.
+
+I don't have to manually rename the file. I don't have to create the movie folder. I don't have to move the finished file into Jellyfin's library. And I don't have to manually refresh the TV.
+
+The automation handles the boring part.
+
+A disc rip or another legitimate media file copied directly into the library folder can skip the ARR pipeline entirely. Jellyfin does not care how the file got there.
+
+</DocSection>
+
+<DocSection index="05" title="Why automation?">
+
+By hand the loop is:
+
+**Find it → fetch it → rename it → move it → organise it → repeat.**
+
+And that is fine when you are doing it once.
+
+Do it for a growing collection of movies and hundreds of TV episodes and suddenly a large part of the homelab is just a very complicated way of avoiding repetitive file management.
+
+Automating does not remove that work. It moves the work to the front.
+
+Define the rules once and the boring part stops needing you.
+
+<Callout kind="why" title="Naming is the actual payoff">
+
+Media servers are pattern matchers. Give Jellyfin a consistent naming scheme and it identifies titles, groups seasons and finds the right artwork.
+
+Give it inconsistent names and you get duplicates, wrong matches and blank posters.
+
+The ARR applications apply that naming scheme automatically, which means the output is predictable even when the original downloaded file name is not.
+
+</Callout>
+
+There is still a trade-off.
+
+The stack is not magic. Containers need updates, permissions need to be correct, API connections can break, indexers can stop responding, downloads can fail, and imports can sit in a queue waiting for something to be fixed.
+
+The difference is that instead of doing the entire process manually every time, I maintain the system once and let it repeat the process.
+
+That is what I actually wanted from it.
+
+</DocSection>
+
+<DocSection index="06" title="Hardlinks and storage">
+
+This is probably the most important storage concept in the ARR setup.
+
+A file on disk is two things: the data, and a name in a directory pointing at it.
+
+A **hardlink** is a second name pointing at the same data. Not a copy, not a shortcut. The same bytes, two paths, counted once against free space.
+
+Delete one name and the data survives while the other path still points at it.
+
+A symlink is different: it points at another *name*, so it can break when that name moves.
+
+<ArchitectureDiagram
+title="One file, two names"
+layers={[
+{ label: 'One filesystem', note: 'The /data filesystem containing both download and library paths' },
+{ label: 'One block of file data', note: 'Written once, counted once against free space' },
+{
+label: 'Two directory entries',
+items: [
+{ label: 'Downloads path', note: 'Where qBittorrent keeps the downloaded data' },
+{ label: 'Library path', note: 'The organised name used by Jellyfin' },
+],
+},
+]}
+caption="The actual layout keeps downloads and media under the same /data filesystem so hardlinks can be used."
+/>
+
+### Why it matters here
+
+The download client wants its copy left where it is so it can continue seeding it.
+
+The media library wants a tidy name in a predictable folder.
+
+Without hardlinks, you have to choose between keeping the file in the download directory and having another copy in the library, or moving it out from under the download client.
+
+With hardlinks, both paths can point at the same underlying data.
+
+The storage layout is therefore deliberate:
+
+```text
+/data/
+  torrents/
+    movies/
+    tv/
+
+  media/
+    movies/
+    tv/
+```
+
+The important detail is not the names themselves.
+
+Both the download directories and the final media directories live under the same `/data` filesystem. That makes hardlinking possible without duplicating the actual video data.
+
+<Callout kind="gotcha" title="Hardlinks stop at the filesystem boundary">
+
+A hardlink cannot cross filesystems.
+
+If downloads sit on one volume and the library sits on another — two disks, two mounts, or container paths that ultimately refer to unrelated filesystems — you cannot create a hardlink between them.
+
+That is why the storage layout was designed around a single `/data` filesystem.
+
+The 300GB Partition on a SATA SSD is passed through to the Dockyard VM and mounted at `/data`, with both the download and media directories living underneath it.
+
+</Callout>
+
+This is one of those decisions that is easy to overlook when first setting up the ARR stack and annoying to change later.
+
+The applications may be separate containers, but from their point of view the important thing is that they see the relevant parts of the same filesystem.
+
+</DocSection>
+
+<DocSection index="07" title="What I've learned">
+
+The biggest lesson from setting up the ARR stack is that the applications themselves are not really the difficult part.
+
+The difficult part is getting all the little assumptions between them right.
+
+A container needs to see the right path.
+
+The download client needs to be able to write there.
+
+Sonarr and Radarr need to be able to see the completed downloads.
+
+The library needs to be somewhere Jellyfin can read.
+
+And if hardlinks are part of the design, those paths need to ultimately exist on the same filesystem.
+
+Once those pieces line up, the individual applications are surprisingly straightforward.
+
+The ARR stack also changed how I think about the media library.
+
+Before this, a movie was basically a file I had to manually get onto the TV.
+
+Now the file is almost the final product of a pipeline.
+
+The automation handles finding and transferring the media, the storage layout determines where it lives, the ARR applications make the naming predictable, and Jellyfin turns the result into something the family can actually use.
+
+I am still learning the deeper parts of the stack, especially how all the different download, import, naming and storage behaviours interact. But the basic idea has clicked:
+
+**The point isn't to automate downloading. The point is to automate everything around maintaining a clean media library.**
+
+The stack sits underneath [Jellyfin](/services/jellyfin) and mostly stays quiet.
+
+That is the highest praise infrastructure gets.
+
+</DocSection>

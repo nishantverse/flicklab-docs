@@ -1,10 +1,39 @@
 <!doctype html>
-<html lang="en">
+<!-- Dark is the default theme; the script below opts out when the visitor chose light. -->
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>test1</title>
+    <meta name="theme-color" content="#11110f" />
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    
+    <title>FlickLabs. Documented.</title>
+    <meta
+      name="description"
+      content="FlickLabs homelab — self-hosted infrastructure, networking, servers and projects."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // <html> ships with class="dark", so dark needs no work here. Drop the class
+      // before first paint when light was chosen, to avoid flashing dark.
+      try {
+        if (localStorage.getItem('flicklabs-theme') === 'light') {
+          document.documentElement.classList.remove('dark')
+          document
+            .querySelector('meta[name="theme-color"]')
+            .setAttribute('content', '#f5f2ec')
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

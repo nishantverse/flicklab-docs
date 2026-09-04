@@ -1,0 +1,211 @@
+<DocLead>
+
+This did not start as an infrastructure project. It started as curiosity, and curiosity is a bad planner. There was no diagram first. The diagram came later, once there was something worth drawing.
+
+What exists now is three machines, a hypervisor, a set of containers, and a media setup that mostly looks after itself. This page is how it got from the first to the second, in order.
+
+One warning before you read on. This is not a perfectly planned infrastructure story. It is the actual path the lab took: experimentation first, mistakes along the way, and structure coming later.
+
+</DocLead>
+
+<DocSection index="01" title="Where this starts">
+
+A homelab is hardware you own, running services you picked, on a network you control. Mine is three machines in a house. No rack, no datacentre, no uptime promise to anybody.
+
+The order matters more than the parts list. Each layer here exists because the setup before it ran out of room, which is the normal way these things grow. Nobody's first move is a hypervisor.
+
+
+
+</DocSection>
+
+<DocSection index="02" title="One machine, many services">
+
+<Timeline>
+
+<TimelineItem index="01" title="Curiosity" when="2024">
+
+Before any of the hardware, there was just interest. Servers, Linux and self-hosting share one appeal: they are things you can poke at directly instead of reading about.
+
+The actual reason is the one part of this page I will not make up.
+
+I started self-hosting mainly because my friends and I played a *lot* of Minecraft, and I wanted to run our own server instead of relying on someone else's hosting. What started as a way to have a Minecraft server quickly turned into an excuse to learn Linux, Docker, networking, and eventually everything else that comes with running your own infrastructure.
+
+</TimelineItem>
+
+<TimelineItem index="02" title="The first services">
+
+There is a clear line between using a computer and running things on one. The first hosted service is where you cross it: something that stays up after you close the laptop, that other devices on the network can reach by IP.
+
+Two facts belong here, and only one person has them.
+
+My first server was an old desktop I already had: an Intel Core i5-4570 with 8 GB of RAM and a 256 GB SSD. I installed Ubuntu Server on it and ran the Minecraft server inside Docker, using playit to make it accessible to my friends.
+
+Minecraft was the first and only service. There wasn't an ARR stack, media server, monitoring system, or anything else yet — just a Minecraft server for me and my friends.
+
+</TimelineItem>
+
+<TimelineItem index="03" title="Docker">
+
+Running two services on one operating system is fine. Running six starts to hurt. They want different versions of the same library, different runtimes, different config paths, and they all write into the same filesystem.
+
+Containers cut that knot. Each service ships with its own dependencies, gets its own filesystem and its own network handle, and appears on the host as one thing to start or stop. Instead of an install guide per service, you get one config file per service.
+
+Docker is in the lab in two places: on the ZimaOS server alongside the file shares and backups, and on the Optiplex.
+
+<Callout kind="why" title="Why containers stuck">
+
+Describe the service once, re-create it on demand. Delete a container, run the same file again, and you are back where you were. That property is what makes the extra layer worth carrying.
+
+</Callout>
+
+</TimelineItem>
+
+<TimelineItem index="04" title="Things started getting messy">
+
+Containers fix dependency conflicts. They do not fix the fact that everything is still one machine.
+
+One kernel, one boot, one network stack. Patch the host and every service goes down together. Get a config wrong and there is no snapshot to fall back to, only your memory of what the file said an hour ago. Try something experimental and you are doing it inches away from the things you actually rely on.
+
+None of that is a problem until the day it is.
+
+I didn't really have a disaster at the beginning. The first proper mess came later, when I tried setting everything up again after having stopped using the machine as a server. I messed up the configuration badly enough that I ended up reinstalling the operating system three times before finally getting everything working again.
+
+That experience eventually pushed me toward Proxmox and LXC containers, where I could experiment without having to treat the entire machine as one big installation.
+
+</TimelineItem>
+
+</Timeline>
+
+</DocSection>
+
+<DocSection index="03" title="Three machines, one lab">
+
+<Timeline>
+
+<TimelineItem index="05" title="Proxmox" when="After the early Ubuntu Server experiments">
+
+Virtualization is the answer to *everything shares one machine*. A hypervisor splits one box into several isolated machines, each with its own OS, its own kernel and its own reboot. Break one and the others never notice.
+
+Here it runs on the Dell Optiplex 7070 Micro: Proxmox VE 9, a Debian-based hypervisor with a web UI. Virtual machines, containers, snapshots and backups all live in one browser tab instead of a pile of remembered shell commands.
+
+The habit it changes is snapshots. Take one before a change, and the worst case stops being *rebuild the service* and becomes *roll back and try again*.
+
+There is more detail on that layer on [the Proxmox page](/infrastructure/proxmox).
+
+</TimelineItem>
+
+<TimelineItem index="06" title="Multiple machines">
+
+One machine can run everything. Three machines let each one have a job, and let one of them reboot without the other two caring.
+
+The split is storage, virtualization, and always-on odd jobs.
+
+<CardGrid columns={3}>
+
+<Card kicker="Storage and services" title="ZimaOS server" mark="◉">
+
+ZimaOS, wired ethernet, static IP. File shares, backups, Docker and media live here. Reachable over SSH, SFTP and SMB.
+
+</Card>
+
+<Card kicker="Virtualization" title="Dell Optiplex 7070 Micro" mark="◈">
+
+Core i5-8500T, 24 GB RAM, a 512 GB NVMe SSD and a 512 GB SATA SSD, running Proxmox VE 9. Ubuntu, Docker and Webmin are part of the picture here too.
+
+</Card>
+
+<Card kicker="Utility node" title="Raspberry Pi 5" mark="◇">
+
+8 GB RAM, Raspberry Pi OS, always on. Monitoring, small automations and network chores. Managed over SSH, wired or Wi-Fi.
+
+</Card>
+
+</CardGrid>
+
+</TimelineItem>
+
+<TimelineItem index="07" title="The current lab">
+
+Nothing in the lab is exotic. The interesting part is the layering: hardware, then a hypervisor, then guests and containers, then the services that actually get used.
+
+<ArchitectureDiagram
+  title="How the pieces fit"
+  layers={[
+    { label: 'Home LAN', note: 'Wired first, 0 public ports' },
+    {
+      label: 'Three machines',
+      items: [
+        { label: 'Dell Optiplex 7070 Micro', note: 'Proxmox VE' },
+        { label: 'ZimaOS server', note: 'Storage and services' },
+        { label: 'Raspberry Pi 5', note: 'Always-on utilities' },
+      ],
+    },
+    { label: 'Virtual machines and containers', note: 'Where services actually run' },
+    {
+      label: 'Services',
+      items: [
+        { label: 'Minecraft Server Manager', note:' Hosting Minecraft servers'},
+        { label: 'Jellyfin', note: 'Media server' },
+        { label: 'ARR Stack', note: 'Media automation' },
+      ],
+    },
+  ]}
+/>
+
+Two of those services are documented properly: [Jellyfin](/services/jellyfin) for playback, and the [ARR Stack](/services/arr-stack) for the automation behind the library.
+
+That diagram keeps its *Conceptual* badge on purpose. The stack is right; the exact virtual machine and container boundaries on the Optiplex are not something this page can claim.
+
+Once I got past the Minecraft server, I started going deeper down the rabbit hole. I realized that a lot of the services I depended on from third parties could actually be hosted myself, which made the whole thing much more interesting.
+
+At that point the homelab stopped being just a Minecraft server and became a way for me to learn by actually building, breaking, fixing, and running things myself.
+
+</TimelineItem>
+
+<TimelineItem index="08" title="What's next">
+
+A homelab is never finished, which is either the appeal or the problem depending on the week. The hardware is settled for now. What changes is what runs on it, and how much of it is written down.
+
+This site is part of that. Writing a thing down is a quick way to find out whether I actually understood it.
+
+The next step isn't necessarily another service. I want to give the hardware I already have a proper home instead of having three machines sitting together with a mess of cables.
+
+A proper server rack or dedicated space would make the setup much cleaner and easier to maintain. Beyond that, I'd like to eventually build an AI-capable server so I can self-host AI models and coding agents instead of relying entirely on external services.
+
+</TimelineItem>
+
+</Timeline>
+
+</DocSection>
+
+<DocSection index="04" title="How I get in">
+
+Day to day, the lab is managed from inside the network. That one sentence covers most of the security model.
+
+SSH for shells, xfreerdp when a desktop is needed, SFTP for moving files, and SMB/CIFS mounts so shares behave like local folders. The ZimaOS server sits on a static IP over wired ethernet, so none of those addresses move underneath me.
+
+<SpecTable
+  label="Access model"
+  rows={[
+    { term: 'Remote', detail: 'SSH · xfreerdp · SFTP' },
+    { term: 'File access', detail: 'SMB/CIFS mounts' },
+    { term: 'Management', detail: 'LAN-first' },
+    { term: 'Public ports', detail: '0' },
+  ]}
+/>
+
+<Callout kind="note" title="Nothing is published">
+
+Zero public ports means nothing in here is reachable from the internet directly. It also means every command on this site is written from the point of view of a machine that is already on the LAN.
+
+</Callout>
+
+</DocSection>
+
+<DocSection index="05" title="An honest note">
+
+The tidy version of this story would have a plan at the start. There wasn't one. There was interest, then a machine, then one more thing worth trying, repeated until it looked like infrastructure.
+
+That's still what makes the homelab interesting to me. It grew because I kept finding another thing I wanted to understand, another service I could run myself, or another part of the setup I could improve.
+
+</DocSection>
