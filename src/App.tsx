@@ -4,6 +4,7 @@ import './index.css'
 import './styles/site.css'
 import './styles/docs.css'
 
+import { Analytics } from '@vercel/analytics/react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 
 import ArrStackDoc from '../content/services/arr-stack.mdx'
@@ -52,6 +53,7 @@ const App = () => {
       </Routes>
 
       <Footer />
+      <Analytics />
     </>
   )
 }
